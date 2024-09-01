@@ -113,54 +113,64 @@ class TranslatorApp:
             total_lines = len(lines)
             last_comment_line = None
 
-            # Regex für Kommentarzeilen und Textzeilen innerhalb von Anführungszeichen
-            regex_comment = r'^\s*#\s*(\w+)\s*"([^"]+)"'
+            # Regex für Kommentarzeilen, Textzeilen innerhalb von Anführungszeichen und Funktionsaufrufe
+            regex_comment = r'^\s*#\s*(.*?)(?:"([^"]*)")?$'
             regex_text = r'^\s*(\w+)\s*"([^"]+)"'
+            regex_function = r'^\s*(\w+\([^)]*\))\s*"([^"]+)"'
 
             for i, line in enumerate(lines):
                 progress_label.config(text=f"Übersetze Zeile {i + 1} von {total_lines}...")
-                progress_window.update_idletasks()  # Update the progress window
+                progress_window.update_idletasks()
 
                 match_comment = re.match(regex_comment, line)
                 match_text = re.match(regex_text, line)
+                match_function = re.match(regex_function, line)
 
                 if match_comment:
-                    # Zeile ist ein Kommentar, daher speichern
                     last_comment_line = line
                 elif match_text:
-                    # Bearbeite allgemeine Textzeilen
-                    def translate_text_match(match):
-                        speaker = match.group(1)
-                        original_text = match.group(2)
-                        if translate_func is None:
-                            raise ValueError("Übersetzungsfunktion ist nicht initialisiert.")
+                    speaker = match_text.group(1)
+                    original_text = match_text.group(2)
+                    if speaker == "old":  # Zeilen mit "old" nicht übersetzen
+                        translated_lines.append(line)
+                    else:
                         try:
                             translated_text = translate_func(original_text)
                         except Exception as e:
                             errors.append(f"Fehler bei der Übersetzung von '{original_text}': {str(e)}")
-                            return f'# {speaker} "{original_text}"\n    {speaker} "{original_text}"'  # Fehler ignorieren und Originaltext beibehalten
+                            translated_text = original_text  # Verwende den Originaltext bei einem Fehler
 
-                        # Kommentarzeile beibehalten und übersetzte Zeile hinzufügen
-                        return f'# {speaker} "{original_text}"\n    {speaker} "{translated_text}"'
+                        if last_comment_line:
+                            translated_lines.append(last_comment_line)
+                            last_comment_line = None  # Zurücksetzen
+                        translated_lines.append(f'    {speaker} "{translated_text}"')
+                elif match_function:
+                    function_call = match_function.group(1)
+                    original_text = match_function.group(2)
+                    try:
+                        translated_text = translate_func(original_text)
+                    except Exception as e:
+                        errors.append(f"Fehler bei der Übersetzung von '{original_text}': {str(e)}")
+                        translated_text = original_text  # Verwende den Originaltext bei einem Fehler
 
-                    translated_line = re.sub(regex_text, translate_text_match, line)
                     if last_comment_line:
                         translated_lines.append(last_comment_line)
-                        last_comment_line = None  # Reset
-                    translated_lines.append(translated_line)
+                        last_comment_line = None  # Zurücksetzen
+                    translated_lines.append(f'    {function_call} "{translated_text}"')
                 else:
-                    if last_comment_line:
-                        translated_lines.append(last_comment_line)
-                        last_comment_line = None
                     translated_lines.append(line)
 
-            # Entferne doppelte Kommentarzeilen
+            # Entferne doppelte Kommentarzeilen und falsche Einrückungen
             cleaned_lines = []
             previous_line = None
 
             for line in translated_lines:
-                if not (line.startswith("#") and previous_line and line == previous_line):
-                    cleaned_lines.append(line)
+                # Entferne doppelte Zeilen und zusätzliche Einrückungen
+                if line.startswith("#") and previous_line and line == previous_line:
+                    continue  # Überspringe doppelte Kommentarzeilen
+                if previous_line and previous_line.strip() and previous_line.strip().startswith("#") and not line.strip().startswith("#"):
+                    cleaned_lines.append("\n")  # Leerzeile hinzufügen zwischen Kommentar und Übersetzung
+                cleaned_lines.append(line)
                 previous_line = line
 
             # Header mit Zeitstempel hinzufügen
@@ -202,3 +212,4 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = TranslatorApp(root)
     root.mainloop()
+
